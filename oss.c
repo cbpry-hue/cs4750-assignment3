@@ -283,8 +283,11 @@ int main(int argc, char* argv[]) {
             // Output sending log to screen and file
             printf("OSS: Sending message to worker %d PID %d at time %d:%d\n", 
                    nextChildIndex, targetPid, sysClock[0], sysClock[1]);
-            fprintf(logFP, "OSS: Sending message to worker %d PID %d at time %d:%d\n", 
+            if (linesWritten < 10000) {
+                fprintf(logFP, "OSS: Sending message to worker %d PID %d at time %d:%d\n", 
                    nextChildIndex, targetPid, sysClock[0], sysClock[1]);
+                linesWritten++;
+            }
 
             // Send message to the specific child 
             msgbuffer sendBuf;
