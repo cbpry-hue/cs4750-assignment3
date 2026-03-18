@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
+#include <getopt.h>
 
 // Defined based on project requirements 
 typedef struct {
@@ -171,7 +172,6 @@ int main(int argc, char* argv[]) {
         cleanupAndExit(1);
     }
 
-    int activeChildren = 0;
     int totalLaunched = 0;
     int nextChildIndex = 0;
     int totalMessagesSent = 0;
