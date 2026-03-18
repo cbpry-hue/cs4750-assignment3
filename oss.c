@@ -214,19 +214,17 @@ int main(int argc, char* argv[]) {
 
             if (slot != -1) {
                 // Generate random run time for child based on fractional -t parameter
-                float random_time = ((float)rand() / (float)RAND_MAX) * timeLimit;
+                // The rubric requires a random interval between 1 second and the -t parameter [cite: 81, 82]
+                float min_time = 1.0f;
+                float actual_limit = timeLimit > min_time ? timeLimit : min_time; 
+                
+                float random_time = min_time + ((float)rand() / (float)RAND_MAX) * (actual_limit - min_time);
                 
                 // Extract whole seconds
                 int durSec = (int)random_time;
                 
                 // Extract the fractional part and convert to nanoseconds
-                int durNano = (int)((random_time - (float)durSec) * 1000000000.0f); 
-
-                // Edge case: Ensure the worker runs for at least some tiny amount of time
-                // to prevent immediate 0-time termination bugs
-                if (durSec == 0 && durNano == 0) {
-                    durNano = 10000; 
-                }
+                int durNano = (int)((random_time - (float)durSec) * 1000000000.0f);
 
                 // Prepare string arguments for execlp
                 char secStr[20], nanoStr[20];
