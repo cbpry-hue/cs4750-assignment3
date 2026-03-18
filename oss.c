@@ -8,24 +8,24 @@
 #include <unistd.h>
 #include <signal.h>
 
-// Defined based on project requirements [cite: 16, 20, 21]
+// Defined based on project requirements 
 typedef struct {
-    int occupied;           // 1 if in use, 0 if free [cite: 23, 24, 38]
-    pid_t pid;              // Process ID of the child [cite: 25, 29]
-    int startSeconds;       // Simulated time when forked [cite: 26, 29]
-    int startNano;          // Simulated time when forked [cite: 27]
-    int endingTimeSeconds;  // Estimated termination time [cite: 28, 33]
-    int endingTimeNano;     // Estimated termination time [cite: 28]
-    int messagesSent;       // Total messages sent to this child [cite: 30, 31]
+    int occupied;           // 1 if in use, 0 if free 
+    pid_t pid;              // Process ID of the child 
+    int startSeconds;       // Simulated time when forked 
+    int startNano;          // Simulated time when forked 
+    int endingTimeSeconds;  // Estimated termination time 
+    int endingTimeNano;     // Estimated termination time 
+    int messagesSent;       // Total messages sent to this child 
 } PCB;
 
-// Global Process Table [cite: 16, 32]
-PCB processTable[20]; // [cite: 32]
+// Global Process Table 
+PCB processTable[20];
 
 // Message buffer structure
 typedef struct {
-    long mtype;     // This will be the child's PID [cite: 14, 128]
-    int status;     // 1 to continue, 0 to terminate [cite: 124]
+    long mtype;     // This will be the child's PID
+    int status;     // 1 to continue, 0 to terminate
 } msgbuffer;
 
 // Global variables for IPC IDs so our signal handler can clean them up
@@ -33,46 +33,89 @@ int shmid;
 int msqid;
 int* sysClock; // sysClock[0] = seconds, sysClock[1] = nanoseconds
 
-// Signal handler for Ctrl-C and the 60-second timeout [cite: 120]
+// Signal handler for Ctrl-C and the 60-second timeout 
 void cleanupAndExit(int signum) {
     if (signum == SIGALRM) {
-        printf("\n[OSS] 60-second timeout reached. Terminating...\n"); // [cite: 118, 119]
+        printf("\n[OSS] 60-second timeout reached. Terminating...\n");
     } else if (signum == SIGINT) {
-        printf("\n[OSS] Ctrl-C caught. Cleaning up...\n"); // [cite: 120]
+        printf("\n[OSS] Ctrl-C caught. Cleaning up...\n");
     }
 
-    // 1. Send kill signals to all active child processes (To be implemented) [cite: 119, 120]
+    // Send kill signals to all active child processes (To be implemented) 
     
-    // 2. Detach and remove shared memory [cite: 120, 142]
+    // Detach and remove shared memory
     shmdt(sysClock);
     shmctl(shmid, IPC_RMID, NULL);
     
-    // 3. Remove message queue [cite: 142]
+    // 3. Remove message queue 
     msgctl(msqid, IPC_RMID, NULL);
 
     printf("[OSS] IPC cleanup complete. Exiting.\n");
     exit(0);
 }
 
+void printProcessTable(FILE* logFP) {
+    pid_t ossPid = getpid();
+    
+    // --- Print to Screen ---
+    printf("OSS PID:%d SysClockS: %d SysclockNano: %d\n", ossPid, sysClock[0], sysClock[1]);
+    printf("Process Table:\n");
+    // Using formatting to align columns nicely based on the assignment example
+    printf("%-5s %-8s %-7s %-6s %-8s %-8s %-8s %-12s\n", 
+           "Entry", "Occupied", "PID", "Starts", "StartN", "EndingTS", "EndingTN", "MessagesSent");
+    
+    for (int i = 0; i < 20; i++) {
+        printf("%-5d %-8d %-7d %-6d %-8d %-8d %-8d %-12d\n", 
+               i, 
+               processTable[i].occupied, 
+               processTable[i].pid, 
+               processTable[i].startSeconds, 
+               processTable[i].startNano, 
+               processTable[i].endingTimeSeconds, 
+               processTable[i].endingTimeNano, 
+               processTable[i].messagesSent);
+    }
+    printf("\n"); // Add a blank line for readability
+    
+    // --- Print to Log File ---
+    fprintf(logFP, "OSS PID:%d SysClockS: %d SysclockNano: %d\n", ossPid, sysClock[0], sysClock[1]);
+    fprintf(logFP, "Process Table:\n");
+    fprintf(logFP, "%-5s %-8s %-7s %-6s %-8s %-8s %-8s %-12s\n", 
+           "Entry", "Occupied", "PID", "Starts", "StartN", "EndingTS", "EndingTN", "MessagesSent");
+    
+    for (int i = 0; i < 20; i++) {
+        fprintf(logFP, "%-5d %-8d %-7d %-6d %-8d %-8d %-8d %-12d\n", 
+               i, 
+               processTable[i].occupied, 
+               processTable[i].pid, 
+               processTable[i].startSeconds, 
+               processTable[i].startNano, 
+               processTable[i].endingTimeSeconds, 
+               processTable[i].endingTimeNano, 
+               processTable[i].messagesSent);
+    }
+    fprintf(logFP, "\n");
+}
+
 int main(int argc, char* argv[]) {
-    // 1. Setup Signal Handlers [cite: 119, 120]
-    signal(SIGINT, cleanupAndExit); // [cite: 120]
-    signal(SIGALRM, cleanupAndExit); // [cite: 119]
-    alarm(60); // Trigger SIGALRM after 60 real-life seconds [cite: 118, 121]
+    // Setup Signal Handlers 
+    signal(SIGINT, cleanupAndExit);
+    signal(SIGALRM, cleanupAndExit);
+    alarm(60); // Trigger SIGALRM after 60 real-life seconds 
 
-    // 2. Parse Command Line Arguments [cite: 74, 75]
+    // Parse Command Line Arguments 
     int opt;
-    int totalProcesses = 0;     // -n parameter [cite: 77]
-    int simulProcesses = 0;     // -s parameter [cite: 77, 89]
-    float timeLimit = 0.0;      // -t parameter [cite: 77, 80]
-    float launchInterval = 0.0; // -i parameter [cite: 78, 83]
-    char logFileName[256] = "log.txt"; // -f parameter [cite: 78, 84]
+    int totalProcesses = 0;     // -n parameter 
+    int simulProcesses = 0;     // -s parameter 
+    float timeLimit = 0.0;      // -t parameter 
+    float launchInterval = 0.0; // -i parameter 
+    char logFileName[256] = "log.txt"; // -f parameter 
 
-    // Parse options using getopt [cite: 146]
+    // Parse options using getopt 
     while ((opt = getopt(argc, argv, "hn:s:t:i:f:")) != -1) {
         switch (opt) {
             case 'h':
-                printf("Usage: ./oss [-h] [-n proc] [-s simul] [-t timeLimit] [-i interval] [-f logfile]\n"); // [cite: 77, 78]
+                printf("Usage: ./oss [-h] [-n proc] [-s simul] [-t timeLimit] [-i interval] [-f logfile]\n");
                 return 0;
             case 'n': totalProcesses = atoi(optarg); break;
             case 's': simulProcesses = atoi(optarg); break;
@@ -85,7 +128,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // 3. Set up Shared Memory for the Simulated Clock [cite: 88, 147]
+    // Set up Shared Memory for the Simulated Clock 
     // We need space for two integers: seconds and nanoseconds
     key_t shmKey = ftok("oss.c", 1); 
     shmid = shmget(shmKey, 2 * sizeof(int), 0666 | IPC_CREAT);
@@ -97,7 +140,7 @@ int main(int argc, char* argv[]) {
     sysClock[0] = 0; // Seconds
     sysClock[1] = 0; // Nanoseconds
 
-    // 4. Set up the Message Queue [cite: 88, 123]
+    // 4. Set up the Message Queue 
     key_t msgKey = ftok("oss.c", 2);
     msqid = msgget(msgKey, 0666 | IPC_CREAT);
     if (msqid == -1) {
@@ -124,14 +167,14 @@ int main(int argc, char* argv[]) {
     // Seed the random number generator for time bounds
     srand(getpid());
 
-    // Main coordination loop [cite: 95]
+    // Main coordination loop
     while (totalLaunched < totalProcesses || activeChildren > 0) {
         
-        // 1. Increment Clock [cite: 96, 113]
-        // Increment by 250ms divided by the number of current children [cite: 115]
+        // Increment Clock 
+        // Increment by 250ms divided by the number of current children 
         int incrementNano = 250000000; 
         if (activeChildren > 0) {
-            incrementNano /= activeChildren; [cite: 116, 117]
+            incrementNano /= activeChildren;
         }
         
         sysClock[1] += incrementNano;
@@ -140,10 +183,10 @@ int main(int argc, char* argv[]) {
             sysClock[1] -= 1000000000;
         }
 
-        // 2. Possibly Launch New Child [cite: 106]
-        // Obey total process limits and simultaneous limits [cite: 89, 90]
+        // Possibly Launch New Child 
+        // Obey total process limits and simultaneous limits 
         if (totalLaunched < totalProcesses && activeChildren < simulProcesses) {
-            // Find a free slot in the process table [cite: 36, 37]
+            // Find a free slot in the process table 
             int slot = -1;
             for (int i = 0; i < 20; i++) {
                 if (processTable[i].occupied == 0) {
@@ -153,33 +196,33 @@ int main(int argc, char* argv[]) {
             }
 
             if (slot != -1) {
-                // Generate random run time for child based on -t parameter [cite: 80, 81]
+                // Generate random run time for child based on -t parameter 
                 // Random seconds between 1 and timeLimit
                 int maxSec = (int)timeLimit;
                 if (maxSec < 1) maxSec = 1;
-                int durSec = (rand() % maxSec) + 1; [cite: 81]
-                int durNano = rand() % 1000000000; [cite: 81]
+                int durSec = (rand() % maxSec) + 1; 
+                int durNano = rand() % 1000000000; 
 
                 // Prepare string arguments for execlp
                 char secStr[20], nanoStr[20];
                 sprintf(secStr, "%d", durSec);
                 sprintf(nanoStr, "%d", durNano);
 
-                pid_t pid = fork(); [cite: 88]
+                pid_t pid = fork(); 
                 if (pid == 0) {
-                    execlp("./worker", "./worker", secStr, nanoStr, NULL); [cite: 88]
+                    execlp("./worker", "./worker", secStr, nanoStr, NULL); 
                     perror("OSS: execlp failed");
                     exit(1);
                 } else if (pid > 0) {
-                    // Parent updates the PCB [cite: 91]
-                    processTable[slot].occupied = 1; [cite: 23]
-                    processTable[slot].pid = pid; [cite: 25]
-                    processTable[slot].startSeconds = sysClock[0]; [cite: 26, 29]
-                    processTable[slot].startNano = sysClock[1]; [cite: 27, 29]
-                    processTable[slot].messagesSent = 0; [cite: 30]
-                    // Estimate ending time [cite: 33]
-                    processTable[slot].endingTimeSeconds = sysClock[0] + durSec; [cite: 28]
-                    processTable[slot].endingTimeNano = sysClock[1] + durNano; [cite: 28]
+                    // Parent updates the PCB 
+                    processTable[slot].occupied = 1; 
+                    processTable[slot].pid = pid; 
+                    processTable[slot].startSeconds = sysClock[0]; 
+                    processTable[slot].startNano = sysClock[1]; 
+                    processTable[slot].messagesSent = 0;
+                    // Estimate ending time 
+                    processTable[slot].endingTimeSeconds = sysClock[0] + durSec;
+                    processTable[slot].endingTimeNano = sysClock[1] + durNano;
                     if (processTable[slot].endingTimeNano >= 1000000000) {
                         processTable[slot].endingTimeSeconds++;
                         processTable[slot].endingTimeNano -= 1000000000;
@@ -188,7 +231,7 @@ int main(int argc, char* argv[]) {
                     activeChildren++;
                     totalLaunched++;
 
-                    // Output process table immediately after launch [cite: 110]
+                    // Output process table immediately after launch
                     printf("\nOSS: Launched child %d in slot %d\n", pid, slot);
                     fprintf(logFP, "\nOSS: Launched child %d in slot %d\n", pid, slot);
                     // TODO: Call your printProcessTable() helper function here
@@ -196,7 +239,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // 3. Send Message and Wait for Reply if we have active children [cite: 97]
+        // Send Message and Wait for Reply if we have active children
         if (activeChildren > 0) {
             // Calculate next child to send a message to (Round Robin) 
             do {
@@ -205,70 +248,70 @@ int main(int argc, char* argv[]) {
 
             pid_t targetPid = processTable[nextChildIndex].pid;
             
-            // Output sending log to screen and file [cite: 85, 98, 128, 129]
+            // Output sending log to screen and file
             printf("OSS: Sending message to worker %d PID %d at time %d:%d\n", 
-                   nextChildIndex, targetPid, sysClock[0], sysClock[1]); [cite: 129]
+                   nextChildIndex, targetPid, sysClock[0], sysClock[1]);
             fprintf(logFP, "OSS: Sending message to worker %d PID %d at time %d:%d\n", 
-                   nextChildIndex, targetPid, sysClock[0], sysClock[1]); [cite: 129]
+                   nextChildIndex, targetPid, sysClock[0], sysClock[1]);
 
-            // Send message to the specific child [cite: 99]
+            // Send message to the specific child 
             msgbuffer sendBuf;
-            sendBuf.mtype = targetPid; // Worker is waiting for its PID [cite: 1458, 1466]
+            sendBuf.mtype = targetPid; // Worker is waiting for its PID 
             sendBuf.status = 1; 
 
             if (msgsnd(msqid, &sendBuf, sizeof(msgbuffer) - sizeof(long), 0) == -1) {
                 perror("OSS: msgsnd failed");
                 break;
             }
-            processTable[nextChildIndex].messagesSent++; [cite: 30, 31]
+            processTable[nextChildIndex].messagesSent++;
             totalMessagesSent++;
 
-            // Wait for message back from the child [cite: 100]
+            // Wait for message back from the child
             msgbuffer rcvBuf;
-            if (msgrcv(msqid, &rcvBuf, sizeof(msgbuffer) - sizeof(long), getpid(), 0) == -1) { [cite: 1464]
+            if (msgrcv(msqid, &rcvBuf, sizeof(msgbuffer) - sizeof(long), getpid(), 0) == -1) {
                 perror("OSS: msgrcv failed");
                 break;
             }
 
-            // Output receiving log [cite: 101, 129]
+            // Output receiving log
             printf("OSS: Receiving message from worker %d PID %d at time %d:%d\n", 
-                   nextChildIndex, targetPid, sysClock[0], sysClock[1]); [cite: 129]
+                   nextChildIndex, targetPid, sysClock[0], sysClock[1]);
             fprintf(logFP, "OSS: Receiving message from worker %d PID %d at time %d:%d\n", 
-                   nextChildIndex, targetPid, sysClock[0], sysClock[1]); [cite: 129]
+                   nextChildIndex, targetPid, sysClock[0], sysClock[1]);
 
-            // Check if child decided to terminate [cite: 102]
-            if (rcvBuf.status == 0) { [cite: 124]
-                printf("OSS: Worker %d PID %d is planning to terminate.\n", nextChildIndex, targetPid); [cite: 103, 130]
-                fprintf(logFP, "OSS: Worker %d PID %d is planning to terminate.\n", nextChildIndex, targetPid); [cite: 130]
+            // Check if child decided to terminate
+            if (rcvBuf.status == 0) {
+                printf("OSS: Worker %d PID %d is planning to terminate.\n", nextChildIndex, targetPid);
+                fprintf(logFP, "OSS: Worker %d PID %d is planning to terminate.\n", nextChildIndex, targetPid); 
                 
-                // Wait for it to clear out [cite: 104, 105]
+                // Wait for it to clear out
                 waitpid(targetPid, NULL, 0); 
 
-                // Update PCB [cite: 38, 105]
-                processTable[nextChildIndex].occupied = 0; [cite: 38]
+                // Update PCB
+                processTable[nextChildIndex].occupied = 0; 
                 activeChildren--;
             }
         }
 
-        // 4. Print Process Table every half a simulated second [cite: 111]
+        // Print Process Table every half a simulated second
         long long currentTotalNano = (long long)sysClock[0] * 1000000000LL + sysClock[1];
         long long lastPrintTotalNano = (long long)lastTablePrintSec * 1000000000LL + lastTablePrintNano;
         
         if (currentTotalNano - lastPrintTotalNano >= 500000000LL) {
-            // TODO: Call your printProcessTable() helper function here [cite: 111, 112]
+            printProcessTable(logFP);
             lastTablePrintSec = sysClock[0];
             lastTablePrintNano = sysClock[1];
         }
     }
 
-    // 5. Ending Report [cite: 107, 132]
+    // Ending Report 
     printf("\n--- System Simulation Complete ---\n");
-    printf("Total processes launched: %d\n", totalLaunched); [cite: 134]
-    printf("Total messages sent by OSS: %d\n", totalMessagesSent); [cite: 134]
+    printf("Total processes launched: %d\n", totalLaunched);
+    printf("Total messages sent by OSS: %d\n", totalMessagesSent);
     
     fprintf(logFP, "\n--- System Simulation Complete ---\n");
-    fprintf(logFP, "Total processes launched: %d\n", totalLaunched); [cite: 134]
-    fprintf(logFP, "Total messages sent by OSS: %d\n", totalMessagesSent); [cite: 134]
+    fprintf(logFP, "Total processes launched: %d\n", totalLaunched);
+    fprintf(logFP, "Total messages sent by OSS: %d\n", totalMessagesSent);
 
     fclose(logFP);
 
