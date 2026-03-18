@@ -5,6 +5,7 @@
 #include <sys/shm.h>
 #include <sys/msg.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
 
@@ -42,6 +43,12 @@ void cleanupAndExit(int signum) {
     }
 
     // Send kill signals to all active child processes (To be implemented) 
+    for (int i = 0; i < 20; i++) {
+        if (processTable[i].occupied == 1) {
+            // Send SIGTERM to politely ask the child to terminate
+            kill(processTable[i].pid, SIGTERM);
+        }
+    }
     
     // Detach and remove shared memory
     shmdt(sysClock);
@@ -54,47 +61,45 @@ void cleanupAndExit(int signum) {
     exit(0);
 }
 
-void printProcessTable(FILE* logFP) {
+int printProcessTable(FILE* logFP, int linesWritten) {
     pid_t ossPid = getpid();
     
     // --- Print to Screen ---
     printf("OSS PID:%d SysClockS: %d SysclockNano: %d\n", ossPid, sysClock[0], sysClock[1]);
     printf("Process Table:\n");
-    // Using formatting to align columns nicely based on the assignment example
     printf("%-5s %-8s %-7s %-6s %-8s %-8s %-8s %-12s\n", 
            "Entry", "Occupied", "PID", "Starts", "StartN", "EndingTS", "EndingTN", "MessagesSent");
     
     for (int i = 0; i < 20; i++) {
         printf("%-5d %-8d %-7d %-6d %-8d %-8d %-8d %-12d\n", 
-               i, 
-               processTable[i].occupied, 
-               processTable[i].pid, 
-               processTable[i].startSeconds, 
-               processTable[i].startNano, 
-               processTable[i].endingTimeSeconds, 
-               processTable[i].endingTimeNano, 
+               i, processTable[i].occupied, processTable[i].pid, 
+               processTable[i].startSeconds, processTable[i].startNano, 
+               processTable[i].endingTimeSeconds, processTable[i].endingTimeNano, 
                processTable[i].messagesSent);
     }
-    printf("\n"); // Add a blank line for readability
+    printf("\n"); 
     
     // --- Print to Log File ---
-    fprintf(logFP, "OSS PID:%d SysClockS: %d SysclockNano: %d\n", ossPid, sysClock[0], sysClock[1]);
-    fprintf(logFP, "Process Table:\n");
-    fprintf(logFP, "%-5s %-8s %-7s %-6s %-8s %-8s %-8s %-12s\n", 
-           "Entry", "Occupied", "PID", "Starts", "StartN", "EndingTS", "EndingTN", "MessagesSent");
-    
-    for (int i = 0; i < 20; i++) {
-        fprintf(logFP, "%-5d %-8d %-7d %-6d %-8d %-8d %-8d %-12d\n", 
-               i, 
-               processTable[i].occupied, 
-               processTable[i].pid, 
-               processTable[i].startSeconds, 
-               processTable[i].startNano, 
-               processTable[i].endingTimeSeconds, 
-               processTable[i].endingTimeNano, 
-               processTable[i].messagesSent);
+    if (linesWritten < 10000) {
+        fprintf(logFP, "OSS PID:%d SysClockS: %d SysclockNano: %d\n", ossPid, sysClock[0], sysClock[1]);
+        fprintf(logFP, "Process Table:\n");
+        fprintf(logFP, "%-5s %-8s %-7s %-6s %-8s %-8s %-8s %-12s\n", 
+               "Entry", "Occupied", "PID", "Starts", "StartN", "EndingTS", "EndingTN", "MessagesSent");
+        linesWritten += 3;
+        
+        for (int i = 0; i < 20; i++) {
+            fprintf(logFP, "%-5d %-8d %-7d %-6d %-8d %-8d %-8d %-12d\n", 
+                   i, processTable[i].occupied, processTable[i].pid, 
+                   processTable[i].startSeconds, processTable[i].startNano, 
+                   processTable[i].endingTimeSeconds, processTable[i].endingTimeNano, 
+                   processTable[i].messagesSent);
+            linesWritten++;
+        }
+        fprintf(logFP, "\n");
+        linesWritten++;
     }
-    fprintf(logFP, "\n");
+    
+    return linesWritten;
 }
 
 int main(int argc, char* argv[]) {
@@ -105,11 +110,14 @@ int main(int argc, char* argv[]) {
 
     // Parse Command Line Arguments 
     int opt;
+    int linesWritten = 0;
+    int activeChildren = 0;
     int totalProcesses = 0;     // -n parameter 
     int simulProcesses = 0;     // -s parameter 
     float timeLimit = 0.0;      // -t parameter 
     float launchInterval = 0.0; // -i parameter 
     char logFileName[256] = "log.txt"; // -f parameter 
+    long long nextLaunchTimeNano = 0; // Tracks when we can launch the next process
 
     // Parse options using getopt 
     while ((opt = getopt(argc, argv, "hn:s:t:i:f:")) != -1) {
@@ -140,7 +148,7 @@ int main(int argc, char* argv[]) {
     sysClock[0] = 0; // Seconds
     sysClock[1] = 0; // Nanoseconds
 
-    // 4. Set up the Message Queue 
+    // Set up the Message Queue 
     key_t msgKey = ftok("oss.c", 2);
     msqid = msgget(msgKey, 0666 | IPC_CREAT);
     if (msqid == -1) {
@@ -149,6 +157,12 @@ int main(int argc, char* argv[]) {
     }
 
     printf("OSS Initialization complete. Clock and Message Queue ready.\n");
+
+    for (int i = 0; i < 20; i++) {
+        processTable[i].occupied = 0;
+        processTable[i].pid = 0;
+        processTable[i].messagesSent = 0;
+    }
 
     // Open the log file for writing (append mode or write mode)
     FILE* logFP = fopen(logFileName, "w");
@@ -183,9 +197,12 @@ int main(int argc, char* argv[]) {
             sysClock[1] -= 1000000000;
         }
 
+        // Calculate current total simulated nanoseconds
+        long long currentTotalSimNano = (long long)sysClock[0] * 1000000000LL + sysClock[1];
+
         // Possibly Launch New Child 
-        // Obey total process limits and simultaneous limits 
-        if (totalLaunched < totalProcesses && activeChildren < simulProcesses) {
+        // Obey total process limits, simultaneous limits, AND the launch interval 
+        if (totalLaunched < totalProcesses && activeChildren < simulProcesses && currentTotalSimNano >= nextLaunchTimeNano) {
             // Find a free slot in the process table 
             int slot = -1;
             for (int i = 0; i < 20; i++) {
@@ -196,12 +213,20 @@ int main(int argc, char* argv[]) {
             }
 
             if (slot != -1) {
-                // Generate random run time for child based on -t parameter 
-                // Random seconds between 1 and timeLimit
-                int maxSec = (int)timeLimit;
-                if (maxSec < 1) maxSec = 1;
-                int durSec = (rand() % maxSec) + 1; 
-                int durNano = rand() % 1000000000; 
+                // Generate random run time for child based on fractional -t parameter
+                float random_time = ((float)rand() / (float)RAND_MAX) * timeLimit;
+                
+                // Extract whole seconds
+                int durSec = (int)random_time;
+                
+                // Extract the fractional part and convert to nanoseconds
+                int durNano = (int)((random_time - (float)durSec) * 1000000000.0f); 
+
+                // Edge case: Ensure the worker runs for at least some tiny amount of time
+                // to prevent immediate 0-time termination bugs
+                if (durSec == 0 && durNano == 0) {
+                    durNano = 10000; 
+                }
 
                 // Prepare string arguments for execlp
                 char secStr[20], nanoStr[20];
@@ -231,10 +256,17 @@ int main(int argc, char* argv[]) {
                     activeChildren++;
                     totalLaunched++;
 
+                    // Calculate when the NEXT process is allowed to launch based on -i
+                    long long intervalNano = (long long)(launchInterval * 1000000000.0f);
+                    nextLaunchTimeNano = currentTotalSimNano + intervalNano;
+
                     // Output process table immediately after launch
                     printf("\nOSS: Launched child %d in slot %d\n", pid, slot);
-                    fprintf(logFP, "\nOSS: Launched child %d in slot %d\n", pid, slot);
-                    // TODO: Call your printProcessTable() helper function here
+                    if (linesWritten < 10000) {
+                        fprintf(logFP, "\nOSS: Launched child %d in slot %d\n", pid, slot);
+                        linesWritten++;
+                    }
+                    linesWritten = printProcessTable(logFP, linesWritten);
                 }
             }
         }
@@ -298,7 +330,7 @@ int main(int argc, char* argv[]) {
         long long lastPrintTotalNano = (long long)lastTablePrintSec * 1000000000LL + lastTablePrintNano;
         
         if (currentTotalNano - lastPrintTotalNano >= 500000000LL) {
-            printProcessTable(logFP);
+            linesWritten = printProcessTable(logFP, linesWritten);
             lastTablePrintSec = sysClock[0];
             lastTablePrintNano = sysClock[1];
         }
