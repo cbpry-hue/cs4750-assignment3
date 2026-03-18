@@ -9,12 +9,12 @@
 // Message buffer structure - MUST match the one in oss.c exactly
 typedef struct {
     long mtype;     // Message type 
-    int status;     // 1 to continue, 0 to terminate [cite: 124]
+    int status;     // 1 to continue, 0 to terminate
 } msgbuffer;
 
 int main(int argc, char* argv[]) {
-    // 1. Verify command line arguments
-    // Worker expects two arguments: seconds and nanoseconds [cite: 42]
+    // Verify command line arguments
+    // Worker expects two arguments: seconds and nanoseconds
     if (argc != 3) {
         fprintf(stderr, "Usage: ./worker <seconds> <nanoseconds>\n");
         return 1;
@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
     int durationSec = atoi(argv[1]);
     int durationNano = atoi(argv[2]);
 
-    // 2. Attach to Shared Memory (Clock)
+    // Attach to Shared Memory (Clock)
     // Keys must match exactly what was used in oss.c
     key_t shmKey = ftok("oss.c", 1);
     int shmid = shmget(shmKey, 2 * sizeof(int), 0666);
@@ -31,9 +31,9 @@ int main(int argc, char* argv[]) {
         perror("Worker: Failed to access shared memory");
         return 1;
     }
-    int* sysClock = (int*)shmat(shmid, NULL, 0); [cite: 45]
+    int* sysClock = (int*)shmat(shmid, NULL, 0);
 
-    // 3. Attach to Message Queue
+    // Attach to Message Queue
     key_t msgKey = ftok("oss.c", 2);
     int msqid = msgget(msgKey, 0666);
     if (msqid == -1) {
@@ -41,8 +41,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 4. Calculate Termination Time
-    // Add the system clock time to the time passed via command line [cite: 52]
+    // Calculate Termination Time
+    // Add the system clock time to the time passed via command line
     int termSec = sysClock[0] + durationSec;
     int termNano = sysClock[1] + durationNano;
 
@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
     pid_t myPpid = getppid();
     int messagesReceived = 0;
 
-    // Output starting information [cite: 57, 58, 59]
+    // Output starting information
     printf("WORKER PID:%d PPID:%d SysClockS: %d SysclockNano: %d TermTimeS: %d TermTimeNano: %d\n", 
            myPid, myPpid, sysClock[0], sysClock[1], termSec, termNano);
     printf("--Just Starting\n");
@@ -64,7 +64,7 @@ int main(int argc, char* argv[]) {
     msgbuffer buf;
     int done = 0;
 
-    // 5. Main Execution Loop
+    // Main Execution Loop
     do { [cite: 46]
         // Wait for a message from oss specifically meant for this process [cite: 47, 60]
         if (msgrcv(msqid, &buf, sizeof(msgbuffer) - sizeof(long), myPid, 0) == -1) {
@@ -74,33 +74,33 @@ int main(int argc, char* argv[]) {
 
         messagesReceived++;
 
-        // Output loop iteration information [cite: 61, 62]
+        // Output loop iteration information
         printf("WORKER PID:%d PPID:%d SysClockS: %d SysclockNano: %d TermTimeS: %d TermTimeNano: %d\n", 
-               myPid, myPpid, sysClock[0], sysClock[1], termSec, termNano); [cite: 63]
-        printf("--%d messages received from oss\n", messagesReceived); [cite: 64, 67]
+               myPid, myPpid, sysClock[0], sysClock[1], termSec, termNano);
+        printf("--%d messages received from oss\n", messagesReceived);
 
-        // Check the clock to determine if it is time to terminate [cite: 48, 49, 53]
-        if ((sysClock[0] > termSec) || (sysClock[0] == termSec && sysClock[1] >= termNano)) { [cite: 56]
+        // Check the clock to determine if it is time to terminate 
+        if ((sysClock[0] > termSec) || (sysClock[0] == termSec && sysClock[1] >= termNano)) { 
             done = 1;
         }
 
         // Prepare response to oss
-        buf.mtype = myPpid;     // Send back to parent [cite: 1470]
-        buf.status = done ? 0 : 1; // 0 if done, 1 if still running [cite: 124]
+        buf.mtype = myPpid;     // Send back to parent 
+        buf.status = done ? 0 : 1; // 0 if done, 1 if still running 
 
-        // Send message to oss [cite: 50, 60]
+        // Send message to oss 
         if (msgsnd(msqid, &buf, sizeof(msgbuffer) - sizeof(long), 0) == -1) {
             perror("Worker: Failed to send message");
             break;
         }
 
-    } while (!done); [cite: 51]
+    } while (!done);
 
-    // 6. Termination sequence
-    // Output final termination information [cite: 56]
+    // Termination sequence
+    // Output final termination information
     printf("WORKER PID:%d PPID:%d SysClockS: %d SysclockNano: %d TermTimeS: %d TermTimeNano: %d\n", 
-           myPid, myPpid, sysClock[0], sysClock[1], termSec, termNano); [cite: 69]
-    printf("--Terminating after sending message back to oss after %d received messages.\n", messagesReceived); [cite: 70]
+           myPid, myPpid, sysClock[0], sysClock[1], termSec, termNano);
+    printf("--Terminating after sending message back to oss after %d received messages.\n", messagesReceived);
 
     // Detach from shared memory before exiting
     shmdt(sysClock);
